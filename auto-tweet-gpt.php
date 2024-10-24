@@ -48,6 +48,11 @@ function auto_tweet_gpt_settings_page() {
             <input type="hidden" name="clear_tweet_log" value="1" />
             <button type="submit" class="button button-secondary">ツイート履歴を削除</button>
         </form>
+
+        <form method="post">
+            <input type="hidden" name="test_tweet" value="1" />
+            <button type="submit" class="button button-primary">テスト投稿</button>
+        </form>
     </div>
     <?php
 }
@@ -66,6 +71,141 @@ function auto_tweet_gpt_register_settings() {
 }
 add_action('admin_init', 'auto_tweet_gpt_register_settings');
 
+// 設定セクションとフィールドの作成
+function auto_tweet_gpt_settings_fields() {
+    add_settings_section(
+        'auto_tweet_gpt_main_section',
+        '主要設定',
+        null,
+        'auto-tweet-gpt-4'
+    );
+
+    add_settings_field(
+        'auto_tweet_gpt_prompts',
+        '問い合わせ内容（各行ごとに入力）',
+        'auto_tweet_gpt_prompts_field',
+        'auto-tweet-gpt-4',
+        'auto_tweet_gpt_main_section'
+    );
+
+    add_settings_field(
+        'auto_tweet_gpt_execution_mode',
+        '実行方法',
+        'auto_tweet_gpt_execution_mode_field',
+        'auto-tweet-gpt-4',
+        'auto_tweet_gpt_main_section'
+    );
+
+    add_settings_field(
+        'auto_tweet_gpt_hashtags',
+        'ハッシュタグ（カンマ区切りで指定）',
+        'auto_tweet_gpt_hashtags_field',
+        'auto-tweet-gpt-4',
+        'auto_tweet_gpt_main_section'
+    );
+
+    add_settings_field(
+        'auto_tweet_gpt_frequency',
+        '実行頻度（分単位）',
+        'auto_tweet_gpt_frequency_field',
+        'auto-tweet-gpt-4',
+        'auto_tweet_gpt_main_section'
+    );
+
+    add_settings_field(
+        'auto_tweet_gpt_openai_key',
+        'OpenAI APIキー',
+        'auto_tweet_gpt_openai_key_field',
+        'auto-tweet-gpt-4',
+        'auto_tweet_gpt_main_section'
+    );
+
+    add_settings_field(
+        'auto_tweet_gpt_twitter_key',
+        'Twitter APIキー',
+        'auto_tweet_gpt_twitter_key_field',
+        'auto-tweet-gpt-4',
+        'auto_tweet_gpt_main_section'
+    );
+
+    add_settings_field(
+        'auto_tweet_gpt_twitter_secret',
+        'Twitter APIシークレットキー',
+        'auto_tweet_gpt_twitter_secret_field',
+        'auto-tweet-gpt-4',
+        'auto_tweet_gpt_main_section'
+    );
+
+    add_settings_field(
+        'auto_tweet_gpt_access_token',
+        'Access Token',
+        'auto_tweet_gpt_access_token_field',
+        'auto-tweet-gpt-4',
+        'auto_tweet_gpt_main_section'
+    );
+
+    add_settings_field(
+        'auto_tweet_gpt_access_secret',
+        'Access Secret',
+        'auto_tweet_gpt_access_secret_field',
+        'auto-tweet-gpt-4',
+        'auto_tweet_gpt_main_section'
+    );
+}
+add_action('admin_init', 'auto_tweet_gpt_settings_fields');
+
+// 各フィールドのHTML
+function auto_tweet_gpt_prompts_field() {
+    $value = get_option('auto_tweet_gpt_prompts', '');
+    echo "<textarea name='auto_tweet_gpt_prompts' rows='5' cols='100'>" . esc_textarea($value) . "</textarea>";
+}
+
+function auto_tweet_gpt_execution_mode_field() {
+    $value = get_option('auto_tweet_gpt_execution_mode', 'random');
+    ?>
+    <select name="auto_tweet_gpt_execution_mode">
+        <option value="random" <?php selected($value, 'random'); ?>>ランダム</option>
+        <option value="sequential" <?php selected($value, 'sequential'); ?>>順番</option>
+    </select>
+    <?php
+}
+
+function auto_tweet_gpt_hashtags_field() {
+    $value = get_option('auto_tweet_gpt_hashtags', '');
+    echo "<input type='text' name='auto_tweet_gpt_hashtags' value='" . esc_attr($value) . "' class='regular-text' />";
+}
+
+function auto_tweet_gpt_frequency_field() {
+    $value = get_option('auto_tweet_gpt_frequency', 60);
+    echo "<input type='number' name='auto_tweet_gpt_frequency' value='" . esc_attr($value) . "' class='small-text' /> 分";
+}
+
+function auto_tweet_gpt_openai_key_field() {
+    $value = get_option('auto_tweet_gpt_openai_key', '');
+    echo "<input type='text' name='auto_tweet_gpt_openai_key' value='" . esc_attr($value) . "' class='regular-text' />";
+}
+
+function auto_tweet_gpt_twitter_key_field() {
+    $value = get_option('auto_tweet_gpt_twitter_key', '');
+    echo "<input type='text' name='auto_tweet_gpt_twitter_key' value='" . esc_attr($value) . "' class='regular-text' />";
+}
+
+function auto_tweet_gpt_twitter_secret_field() {
+    $value = get_option('auto_tweet_gpt_twitter_secret', '');
+    echo "<input type='text' name='auto_tweet_gpt_twitter_secret' value='" . esc_attr($value) . "' class='regular-text' />";
+}
+
+function auto_tweet_gpt_access_token_field() {
+    $value = get_option('auto_tweet_gpt_access_token', '');
+    echo "<input type='text' name='auto_tweet_gpt_access_token' value='" . esc_attr($value) . "' class='regular-text' />";
+}
+
+function auto_tweet_gpt_access_secret_field() {
+    $value = get_option('auto_tweet_gpt_access_secret', '');
+    echo "<input type='text' name='auto_tweet_gpt_access_secret' value='" . esc_attr($value) . "' class='regular-text' />";
+}
+
+
 // ツイートログを表示する関数
 function auto_tweet_gpt_display_tweet_log() {
     $tweet_log = get_option('auto_tweet_gpt_tweet_log', array());
@@ -81,6 +221,15 @@ function auto_tweet_gpt_display_tweet_log() {
         echo '</ul>';
     }
 }
+
+// ツイートの即時投稿処理
+add_action('admin_init', function() {
+    if (isset($_POST['test_tweet'])) {
+        auto_tweet_gpt_execute();
+        wp_redirect(admin_url('options-general.php?page=auto-tweet-gpt-4'));
+        exit;
+    }
+});
 
 // ツイートログを保存する関数
 function auto_tweet_gpt_save_tweet_log($content) {
@@ -125,6 +274,27 @@ add_filter('cron_schedules', function($schedules) {
     return $schedules;
 });
 
+// プロンプト（問い合わせ内容）を取得する関数
+function auto_tweet_gpt_get_prompt() {
+    $prompts = explode("\n", get_option('auto_tweet_gpt_prompts', ''));
+    $mode = get_option('auto_tweet_gpt_execution_mode', 'random');
+
+    // 空白の行を取り除く
+    $prompts = array_filter(array_map('trim', $prompts));
+
+    if (empty($prompts)) {
+        return '今日のためになる情報を教えてください。';
+    }
+
+    if ($mode === 'random') {
+        return $prompts[array_rand($prompts)]; // ランダムに選択
+    } else {
+        $index = get_option('auto_tweet_gpt_last_index', 0) % count($prompts);
+        update_option('auto_tweet_gpt_last_index', $index + 1);
+        return $prompts[$index]; // 順番に選択
+    }
+}
+
 // GPT-4を使った問い合わせとツイート送信
 function auto_tweet_gpt_execute() {
     $prompt = auto_tweet_gpt_get_prompt();
@@ -133,7 +303,17 @@ function auto_tweet_gpt_execute() {
     $twitter_secret = get_option('auto_tweet_gpt_twitter_secret', '');
     $access_token = get_option('auto_tweet_gpt_access_token', '');
     $access_secret = get_option('auto_tweet_gpt_access_secret', '');
-
+    
+    // 各種キーが取得できているか確認
+    error_log('API Key: ' . $twitter_key);
+    error_log('API Secret: ' . $twitter_secret);
+    error_log('Access Token: ' . $access_token);
+    error_log('Access Secret: ' . $access_secret);
+    if (empty($twitter_key) || empty($twitter_secret) || empty($access_token) || empty($access_secret)) {
+        error_log('Twitter API キーが未設定です');
+        return;
+    }
+    
     $response = wp_remote_post('https://api.openai.com/v1/chat/completions', array(
         'headers' => array(
             'Authorization' => 'Bearer ' . $openai_key,
@@ -154,18 +334,27 @@ function auto_tweet_gpt_execute() {
     $hashtags = get_option('auto_tweet_gpt_hashtags', '');
     $tweet = mb_substr($content, 0, 140 - mb_strlen($hashtags) - 1) . ' ' . $hashtags;
 
-    require 'vendor/autoload.php';
-    use Abraham\TwitterOAuth\TwitterOAuth;
-
     $connection = new TwitterOAuth($twitter_key, $twitter_secret, $access_token, $access_secret);
-    $result = $connection->post('statuses/update', ['status' => $tweet]);
-
-    if ($connection->getLastHttpCode() == 200) {
-        auto_tweet_gpt_save_tweet_log($tweet); // ツイートをログに保存
-        error_log('ツイート成功: ' . $tweet);
-    } else {
-        error_log('ツイート失敗: ' . print_r($result, true));
+    if (!$connection) {
+        error_log('TwitterOAuthの initialize error');
+        exit;
     }
+    // error_log('connection : ' . var_export($connection, true));
+
+    $rate_limit = $connection->get('application/rate_limit_status');
+    error_log('rete limit : ' . var_export($rate_limit, true));
+
+    $tweet = rawurlencode($tweet); // ツイート内容をURLエンコード
+    $result = $connection->post('statuses/update', parameters: ['status' => $tweet]);
+
+    $status_code = $connection->getLastHttpCode(); // HTTPステータスコードを取得
+    if ($status_code == 200) {
+        auto_tweet_gpt_save_tweet_log($tweet); // ツイートをログに保存
+        error_log('Tweet OK: ' . $tweet);
+    } else {
+        error_log('Tweet NG (HTTP): ' . $status_code);
+        error_log('Twitter API Response: ' . var_export($result, true));
+        }
 }
 add_action('auto_tweet_gpt_event', 'auto_tweet_gpt_execute');
 
@@ -176,3 +365,5 @@ register_activation_hook(__FILE__, 'auto_tweet_gpt_schedule');
 register_deactivation_hook(__FILE__, function() {
     wp_clear_scheduled_hook('auto_tweet_gpt_event');
 });
+
+
