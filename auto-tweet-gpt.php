@@ -3,17 +3,14 @@
 Plugin Name: Auto Tweet GPT-4 Bot
 Description: GPT-4を使ってX（Twitter）に自動でツイートするWordPressプラグイン
 Version: 1.4
-Author: あなたの名前
+Author: Futoshi Okazaki
 */
 
 if (!defined('ABSPATH')) {
-    exit; // 直接アクセスを防ぐ
+    exit;
 }
 
-// Composerのオートロードを読み込む
 require_once __DIR__ . '/vendor/autoload.php';
-
-// TwitterOAuthの名前空間をインポート
 use Abraham\TwitterOAuth\TwitterOAuth;
 
 // プラグイン設定ページの追加
@@ -27,6 +24,7 @@ function auto_tweet_gpt_menu() {
     );
 }
 add_action('admin_menu', 'auto_tweet_gpt_menu');
+
 
 // 設定ページのHTML
 function auto_tweet_gpt_settings_page() {
@@ -297,64 +295,80 @@ function auto_tweet_gpt_get_prompt() {
 
 // GPT-4を使った問い合わせとツイート送信
 function auto_tweet_gpt_execute() {
-    $prompt = auto_tweet_gpt_get_prompt();
-    $openai_key = get_option('auto_tweet_gpt_openai_key', '');
-    $twitter_key = get_option('auto_tweet_gpt_twitter_key', '');
-    $twitter_secret = get_option('auto_tweet_gpt_twitter_secret', '');
-    $access_token = get_option('auto_tweet_gpt_access_token', '');
-    $access_secret = get_option('auto_tweet_gpt_access_secret', '');
-    
-    // 各種キーが取得できているか確認
-    error_log('API Key: ' . $twitter_key);
-    error_log('API Secret: ' . $twitter_secret);
-    error_log('Access Token: ' . $access_token);
-    error_log('Access Secret: ' . $access_secret);
-    if (empty($twitter_key) || empty($twitter_secret) || empty($access_token) || empty($access_secret)) {
-        error_log('Twitter API キーが未設定です');
-        return;
-    }
-    
-    $response = wp_remote_post('https://api.openai.com/v1/chat/completions', array(
-        'headers' => array(
-            'Authorization' => 'Bearer ' . $openai_key,
-            'Content-Type'  => 'application/json',
-        ),
-        'body' => json_encode(array(
-            'model'    => 'gpt-4o',
-            'messages' => array(
-                array('role' => 'system', 'content' => $prompt)
-            ),
-        )),
-    ));
-
-    $body = wp_remote_retrieve_body($response);
-    $data = json_decode($body, true);
-    $content = $data['choices'][0]['message']['content'] ?? '';
-
-    $hashtags = get_option('auto_tweet_gpt_hashtags', '');
-    $tweet = mb_substr($content, 0, 140 - mb_strlen($hashtags) - 1) . ' ' . $hashtags;
-
-    $connection = new TwitterOAuth($twitter_key, $twitter_secret, $access_token, $access_secret);
-    if (!$connection) {
-        error_log('TwitterOAuthの initialize error');
-        exit;
-    }
-    // error_log('connection : ' . var_export($connection, true));
-
-    $rate_limit = $connection->get('application/rate_limit_status');
-    error_log('rete limit : ' . var_export($rate_limit, true));
-
-    $tweet = rawurlencode($tweet); // ツイート内容をURLエンコード
-    $result = $connection->post('statuses/update', parameters: ['status' => $tweet]);
-
-    $status_code = $connection->getLastHttpCode(); // HTTPステータスコードを取得
-    if ($status_code == 200) {
-        auto_tweet_gpt_save_tweet_log($tweet); // ツイートをログに保存
-        error_log('Tweet OK: ' . $tweet);
-    } else {
-        error_log('Tweet NG (HTTP): ' . $status_code);
-        error_log('Twitter API Response: ' . var_export($result, true));
+    try {
+        $prompt = auto_tweet_gpt_get_prompt();
+        $openai_key = get_option('auto_tweet_gpt_openai_key', '');
+        $twitter_key = get_option('auto_tweet_gpt_twitter_key', '');
+        $twitter_secret = get_option('auto_tweet_gpt_twitter_secret', '');
+        $access_token = get_option('auto_tweet_gpt_access_token', '');
+        $access_secret = get_option('auto_tweet_gpt_access_secret', '');
+        
+        // API キーのバリデーション
+        if (empty($openai_key)) {
+            throw new Exception('OpenAI APIキーが設定されていません。');
         }
+        if (empty($twitter_key) || empty($twitter_secret) || empty($access_token) || empty($access_secret)) {
+            throw new Exception('Twitter APIキーが正しく設定されていません。');
+        }
+        
+        // OpenAI APIへのリクエスト
+        $response = wp_remote_post('https://api.openai.com/v1/chat/completions', array(
+            'timeout' => 30,
+            'headers' => array(
+                'Authorization' => 'Bearer ' . $openai_key,
+                'Content-Type'  => 'application/json',
+            ),
+            'body' => json_encode(array(
+                'model'    => 'gpt-4o',  // 
+                'messages' => array(
+                    array('role' => 'user', 'content' => $prompt)  // roleをuserに修正
+                ),
+                'max_tokens' => 150,  // トークン数制限を追加
+            )),
+        ));
+
+        if (is_wp_error($response)) {
+            throw new Exception('OpenAI APIエラー: ' . $response->get_error_message());
+        }
+
+        $body = wp_remote_retrieve_body($response);
+        $data = json_decode($body, true);
+        
+        if (!isset($data['choices'][0]['message']['content'])) {
+            throw new Exception('OpenAI APIからの応答が不正です。');
+        }
+
+        $content = $data['choices'][0]['message']['content'];
+        $hashtags = get_option('auto_tweet_gpt_hashtags', '');
+        
+        // ツイート文字数制限（URLや画像を考慮して280文字に制限）
+        $max_length = 280 - mb_strlen($hashtags) - 1;
+        $tweet = mb_substr($content, 0, $max_length) . ($hashtags ? ' ' . $hashtags : '');
+
+        // TwitterOAuthの初期化
+        $connection = new TwitterOAuth(
+            $twitter_key,
+            $twitter_secret,
+            $access_token,
+            $access_secret
+        );
+        $connection->setTimeouts(10, 15);  // 接続タイムアウトを設定
+
+        // ツイートの投稿
+        $result = $connection->post('tweets', ['text' => $tweet]);  // APIエンドポイントを修正
+
+        $status_code = $connection->getLastHttpCode();
+        if ($status_code === 201) {  // Twitter API v2では201が成功
+            auto_tweet_gpt_save_tweet_log($tweet);
+            error_log('Tweet successful: ' . $tweet);
+        } else {
+            throw new Exception('Twitter API Error: Status ' . $status_code . ', Response: ' . print_r($result, true));
+        }
+    } catch (Exception $e) {
+        error_log('Auto Tweet GPT Error: ' . $e->getMessage());
+        // 管理画面で表示するためにエラーを保存
+        update_option('auto_tweet_gpt_last_error', date('Y-m-d H:i:s') . ': ' . $e->getMessage());
+    }
 }
 add_action('auto_tweet_gpt_event', 'auto_tweet_gpt_execute');
 
