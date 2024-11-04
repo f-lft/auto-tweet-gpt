@@ -11,10 +11,12 @@ if (!defined('ABSPATH')) {
 }
 
 require_once __DIR__ . '/vendor/autoload.php';
+
 use Abraham\TwitterOAuth\TwitterOAuth;
 
 // プラグイン設定ページの追加
-function auto_tweet_gpt_menu() {
+function auto_tweet_gpt_menu()
+{
     add_options_page(
         'Auto Tweet GPT-4 設定',
         'Auto Tweet GPT-4',
@@ -27,10 +29,29 @@ add_action('admin_menu', 'auto_tweet_gpt_menu');
 
 
 // 設定ページのHTML
-function auto_tweet_gpt_settings_page() {
-    ?>
+function auto_tweet_gpt_settings_page()
+{
+?>
     <div class="wrap">
         <h1>Auto Tweet GPT-4 設定</h1>
+
+        <?php if (get_option('auto_tweet_gpt_time_control_enabled', 1)): ?>
+            <div class="notice notice-info">
+                <p>📢 現在の投稿制限時間</p>
+                <p>
+                    <?php
+                    $start = get_option('auto_tweet_gpt_quiet_start', '00:00');
+                    $end = get_option('auto_tweet_gpt_quiet_end', '07:00');
+                    echo sprintf(
+                        '日本時間の%sから%sまでの間は自動投稿を行いません。',
+                        esc_html($start),
+                        esc_html($end)
+                    );
+                    ?>
+                </p>
+            </div>
+        <?php endif; ?>
+
         <form method="post" action="options.php">
             <?php
             settings_fields('auto_tweet_gpt_options');
@@ -52,11 +73,12 @@ function auto_tweet_gpt_settings_page() {
             <button type="submit" class="button button-primary">テスト投稿</button>
         </form>
     </div>
-    <?php
+<?php
 }
 
 // 設定の登録
-function auto_tweet_gpt_register_settings() {
+function auto_tweet_gpt_register_settings()
+{
     register_setting('auto_tweet_gpt_options', 'auto_tweet_gpt_prompts');
     register_setting('auto_tweet_gpt_options', 'auto_tweet_gpt_execution_mode');
     register_setting('auto_tweet_gpt_options', 'auto_tweet_gpt_hashtags');
@@ -66,18 +88,29 @@ function auto_tweet_gpt_register_settings() {
     register_setting('auto_tweet_gpt_options', 'auto_tweet_gpt_twitter_secret');
     register_setting('auto_tweet_gpt_options', 'auto_tweet_gpt_access_token');
     register_setting('auto_tweet_gpt_options', 'auto_tweet_gpt_access_secret');
+    // 時間帯設定の追加
+    register_setting('auto_tweet_gpt_options', 'auto_tweet_gpt_quiet_start');
+    register_setting('auto_tweet_gpt_options', 'auto_tweet_gpt_quiet_end');
+    register_setting('auto_tweet_gpt_options', 'auto_tweet_gpt_time_control_enabled');
 }
 add_action('admin_init', 'auto_tweet_gpt_register_settings');
 
 // 設定セクションとフィールドの作成
-function auto_tweet_gpt_settings_fields() {
+function auto_tweet_gpt_settings_fields()
+{
     add_settings_section(
         'auto_tweet_gpt_main_section',
         '主要設定',
         null,
         'auto-tweet-gpt-4'
     );
-
+    // 時間帯制御セクションの追加
+    add_settings_section(
+        'auto_tweet_gpt_time_section',
+        '投稿時間設定',
+        'auto_tweet_gpt_time_section_callback',
+        'auto-tweet-gpt-4'
+    );
     add_settings_field(
         'auto_tweet_gpt_prompts',
         '問い合わせ内容（各行ごとに入力）',
@@ -149,60 +182,133 @@ function auto_tweet_gpt_settings_fields() {
         'auto-tweet-gpt-4',
         'auto_tweet_gpt_main_section'
     );
+
+    // 時間帯制御の有効/無効設定
+    add_settings_field(
+        'auto_tweet_gpt_time_control_enabled',
+        '時間帯制御',
+        'auto_tweet_gpt_time_control_enabled_field',
+        'auto-tweet-gpt-4',
+        'auto_tweet_gpt_time_section'
+    );
+
+    // 投稿制限開始時刻
+    add_settings_field(
+        'auto_tweet_gpt_quiet_start',
+        '投稿制限開始時刻',
+        'auto_tweet_gpt_quiet_start_field',
+        'auto-tweet-gpt-4',
+        'auto_tweet_gpt_time_section'
+    );
+
+    // 投稿制限終了時刻
+    add_settings_field(
+        'auto_tweet_gpt_quiet_end',
+        '投稿制限終了時刻',
+        'auto_tweet_gpt_quiet_end_field',
+        'auto-tweet-gpt-4',
+        'auto_tweet_gpt_time_section'
+    );
 }
 add_action('admin_init', 'auto_tweet_gpt_settings_fields');
 
+// 時間帯セクションの説明
+function auto_tweet_gpt_time_section_callback()
+{
+    echo '<p>投稿を制限する時間帯を設定します。デフォルトでは深夜0時から朝7時までの間は投稿を行いません。</p>';
+}
+
 // 各フィールドのHTML
-function auto_tweet_gpt_prompts_field() {
+function auto_tweet_gpt_prompts_field()
+{
     $value = get_option('auto_tweet_gpt_prompts', '');
     echo "<textarea name='auto_tweet_gpt_prompts' rows='5' cols='100'>" . esc_textarea($value) . "</textarea>";
 }
 
-function auto_tweet_gpt_execution_mode_field() {
+function auto_tweet_gpt_execution_mode_field()
+{
     $value = get_option('auto_tweet_gpt_execution_mode', 'random');
-    ?>
+?>
     <select name="auto_tweet_gpt_execution_mode">
         <option value="random" <?php selected($value, 'random'); ?>>ランダム</option>
         <option value="sequential" <?php selected($value, 'sequential'); ?>>順番</option>
     </select>
-    <?php
+<?php
 }
 
-function auto_tweet_gpt_hashtags_field() {
+function auto_tweet_gpt_hashtags_field()
+{
     $value = get_option('auto_tweet_gpt_hashtags', '');
     echo "<input type='text' name='auto_tweet_gpt_hashtags' value='" . esc_attr($value) . "' class='regular-text' />";
 }
 
-function auto_tweet_gpt_frequency_field() {
+function auto_tweet_gpt_frequency_field()
+{
     $value = get_option('auto_tweet_gpt_frequency', 60);
     echo "<input type='number' name='auto_tweet_gpt_frequency' value='" . esc_attr($value) . "' class='small-text' /> 分";
 }
 
-function auto_tweet_gpt_openai_key_field() {
+function auto_tweet_gpt_openai_key_field()
+{
     $value = get_option('auto_tweet_gpt_openai_key', '');
     echo "<input type='text' name='auto_tweet_gpt_openai_key' value='" . esc_attr($value) . "' class='regular-text' />";
 }
 
-function auto_tweet_gpt_twitter_key_field() {
+function auto_tweet_gpt_twitter_key_field()
+{
     $value = get_option('auto_tweet_gpt_twitter_key', '');
     echo "<input type='text' name='auto_tweet_gpt_twitter_key' value='" . esc_attr($value) . "' class='regular-text' />";
 }
 
-function auto_tweet_gpt_twitter_secret_field() {
+function auto_tweet_gpt_twitter_secret_field()
+{
     $value = get_option('auto_tweet_gpt_twitter_secret', '');
     echo "<input type='text' name='auto_tweet_gpt_twitter_secret' value='" . esc_attr($value) . "' class='regular-text' />";
 }
 
-function auto_tweet_gpt_access_token_field() {
+function auto_tweet_gpt_access_token_field()
+{
     $value = get_option('auto_tweet_gpt_access_token', '');
     echo "<input type='text' name='auto_tweet_gpt_access_token' value='" . esc_attr($value) . "' class='regular-text' />";
 }
 
-function auto_tweet_gpt_access_secret_field() {
+function auto_tweet_gpt_access_secret_field()
+{
     $value = get_option('auto_tweet_gpt_access_secret', '');
     echo "<input type='text' name='auto_tweet_gpt_access_secret' value='" . esc_attr($value) . "' class='regular-text' />";
 }
 
+// 時間帯制御の有効/無効設定フィールド
+function auto_tweet_gpt_time_control_enabled_field()
+{
+    $enabled = get_option('auto_tweet_gpt_time_control_enabled', 1); // デフォルトで有効
+?>
+    <label>
+        <input type="checkbox" name="auto_tweet_gpt_time_control_enabled" value="1" <?php checked(1, $enabled); ?> />
+        時間帯による投稿制限を有効にする
+    </label>
+<?php
+}
+
+// 投稿制限開始時刻フィールド
+function auto_tweet_gpt_quiet_start_field()
+{
+    $quiet_start = get_option('auto_tweet_gpt_quiet_start', '00:00');
+?>
+    <input type="time" name="auto_tweet_gpt_quiet_start" value="<?php echo esc_attr($quiet_start); ?>" />
+    <p class="description">この時刻から投稿を制限します（デフォルト: 00:00）</p>
+<?php
+}
+
+// 投稿制限終了時刻フィールド
+function auto_tweet_gpt_quiet_end_field()
+{
+    $quiet_end = get_option('auto_tweet_gpt_quiet_end', '07:00');
+?>
+    <input type="time" name="auto_tweet_gpt_quiet_end" value="<?php echo esc_attr($quiet_end); ?>" />
+    <p class="description">この時刻まで投稿を制限します（デフォルト: 07:00）</p>
+<?php
+}
 
 // ツイートログを表示する関数
 function auto_tweet_gpt_display_tweet_log() {
@@ -210,18 +316,21 @@ function auto_tweet_gpt_display_tweet_log() {
     $tweet_log = array_reverse($tweet_log); // 最新順に表示
 
     if (empty($tweet_log)) {
-        echo '<p>ツイート履歴はありません。</p>';
+        echo '<p>No tweets logged yet.</p>';
     } else {
-        echo '<ul>';
+        echo '<ul class="tweet-log-list">';
         foreach (array_slice($tweet_log, 0, 50) as $log) {
-            echo '<li><strong>' . esc_html($log['time']) . '</strong>: ' . esc_html($log['content']) . '</li>';
+            echo '<li class="tweet-log-item">';
+            echo '<span class="tweet-log-time">' . esc_html($log['time']) . '</span>';
+            echo '<span class="tweet-log-content">' . esc_html($log['content']) . '</span>';
+            echo '</li>';
         }
         echo '</ul>';
     }
 }
 
 // ツイートの即時投稿処理
-add_action('admin_init', function() {
+add_action('admin_init', function () {
     if (isset($_POST['test_tweet'])) {
         auto_tweet_gpt_execute();
         wp_redirect(admin_url('options-general.php?page=auto-tweet-gpt-4'));
@@ -230,7 +339,8 @@ add_action('admin_init', function() {
 });
 
 // ツイートログを保存する関数
-function auto_tweet_gpt_save_tweet_log($content) {
+function auto_tweet_gpt_save_tweet_log($content)
+{
     $tweet_log = get_option('auto_tweet_gpt_tweet_log', array());
 
     $tweet_log[] = array(
@@ -254,7 +364,8 @@ if (isset($_POST['clear_tweet_log'])) {
 }
 
 // 定期実行のスケジュール設定
-function auto_tweet_gpt_schedule() {
+function auto_tweet_gpt_schedule()
+{
     if (wp_next_scheduled('auto_tweet_gpt_event')) {
         wp_clear_scheduled_hook('auto_tweet_gpt_event');
     }
@@ -263,7 +374,7 @@ function auto_tweet_gpt_schedule() {
     wp_schedule_event(time(), 'auto_tweet_gpt_custom_interval', 'auto_tweet_gpt_event');
 }
 
-add_filter('cron_schedules', function($schedules) {
+add_filter('cron_schedules', function ($schedules) {
     $frequency = (int)get_option('auto_tweet_gpt_frequency', 60);
     $schedules['auto_tweet_gpt_custom_interval'] = array(
         'interval' => $frequency * 60,
@@ -273,7 +384,8 @@ add_filter('cron_schedules', function($schedules) {
 });
 
 // プロンプト（問い合わせ内容）を取得する関数
-function auto_tweet_gpt_get_prompt() {
+function auto_tweet_gpt_get_prompt()
+{
     $prompts = explode("\n", get_option('auto_tweet_gpt_prompts', ''));
     $mode = get_option('auto_tweet_gpt_execution_mode', 'random');
 
@@ -294,15 +406,32 @@ function auto_tweet_gpt_get_prompt() {
 }
 
 // GPT-4を使った問い合わせとツイート送信
-function auto_tweet_gpt_execute() {
+function auto_tweet_gpt_execute()
+{
     try {
+        // 時間帯制御が有効な場合のみチェック
+        if (get_option('auto_tweet_gpt_time_control_enabled', 1)) {
+            $timezone = new DateTimeZone('Asia/Tokyo');
+            $now = new DateTime('now', $timezone);
+            $current_time = $now->format('H:i');
+
+            $quiet_start = get_option('auto_tweet_gpt_quiet_start', '00:00');
+            $quiet_end = get_option('auto_tweet_gpt_quiet_end', '07:00');
+
+            // 現在時刻が制限時間内かチェック
+            if ($quiet_start <= $current_time && $current_time < $quiet_end) {
+                error_log('Auto Tweet GPT: 投稿制限時間帯のため、ツイートをスキップしました。時刻: ' . $now->format('Y-m-d H:i:s'));
+                return;
+            }
+        }
+
         $prompt = auto_tweet_gpt_get_prompt();
         $openai_key = get_option('auto_tweet_gpt_openai_key', '');
         $twitter_key = get_option('auto_tweet_gpt_twitter_key', '');
         $twitter_secret = get_option('auto_tweet_gpt_twitter_secret', '');
         $access_token = get_option('auto_tweet_gpt_access_token', '');
         $access_secret = get_option('auto_tweet_gpt_access_secret', '');
-        
+
         // API キーのバリデーション
         if (empty($openai_key)) {
             throw new Exception('OpenAI APIキーが設定されていません。');
@@ -310,7 +439,7 @@ function auto_tweet_gpt_execute() {
         if (empty($twitter_key) || empty($twitter_secret) || empty($access_token) || empty($access_secret)) {
             throw new Exception('Twitter APIキーが正しく設定されていません。');
         }
-        
+
         // OpenAI APIへのリクエスト
         $response = wp_remote_post('https://api.openai.com/v1/chat/completions', array(
             'timeout' => 30,
@@ -333,14 +462,14 @@ function auto_tweet_gpt_execute() {
 
         $body = wp_remote_retrieve_body($response);
         $data = json_decode($body, true);
-        
+
         if (!isset($data['choices'][0]['message']['content'])) {
             throw new Exception('OpenAI APIからの応答が不正です。');
         }
 
         $content = $data['choices'][0]['message']['content'];
         $hashtags = get_option('auto_tweet_gpt_hashtags', '');
-        
+
         // ツイート文字数制限（URLや画像を考慮して280文字に制限）
         $max_length = 280 - mb_strlen($hashtags) - 1;
         $tweet = mb_substr($content, 0, $max_length) . ($hashtags ? ' ' . $hashtags : '');
@@ -376,8 +505,39 @@ add_action('auto_tweet_gpt_event', 'auto_tweet_gpt_execute');
 register_activation_hook(__FILE__, 'auto_tweet_gpt_schedule');
 
 // プラグイン無効化時のスケジュール解除
-register_deactivation_hook(__FILE__, function() {
+register_deactivation_hook(__FILE__, function () {
     wp_clear_scheduled_hook('auto_tweet_gpt_event');
 });
 
+
+function auto_tweet_gpt_custom_styles() {
+    echo '
+    <style>
+        .tweet-log-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .tweet-log-item {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            padding: 15px;
+            margin-bottom: 10px;
+            background-color: #f9f9f9;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        .tweet-log-time {
+            font-size: 0.9em;
+            color: #777;
+        }
+        .tweet-log-content {
+            font-size: 1em;
+            color: #333;
+        }
+    </style>
+    ';
+}
+add_action('admin_head', 'auto_tweet_gpt_custom_styles');
 
