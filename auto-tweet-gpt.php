@@ -27,8 +27,21 @@ function auto_tweet_gpt_menu()
 }
 add_action('admin_menu', 'auto_tweet_gpt_menu');
 
+// 次の実行時間を取得する関数
+function auto_tweet_gpt_get_next_scheduled_time()
+{
+    $timestamp = wp_next_scheduled('auto_tweet_gpt_event');
+    if ($timestamp) {
+        $date = new DateTime();
+        $date->setTimestamp($timestamp);
+        $date->setTimezone(new DateTimeZone('Asia/Tokyo'));  // タイムゾーンを日本時間に設定
+        return $date->format('Y-m-d H:i:s');  // 実行予定日時を表示形式にフォーマット
+    }
+    return 'スケジュールが設定されていません';
+}
 
-// 設定ページのHTML
+
+// 設定ページのHTML内に実行予定時間を表示
 function auto_tweet_gpt_settings_page()
 {
 ?>
@@ -51,6 +64,14 @@ function auto_tweet_gpt_settings_page()
                 </p>
             </div>
         <?php endif; ?>
+
+        <!-- 次回実行予定時間の表示 -->
+        <div class="notice notice-info">
+            <p>⏰ 次の実行予定時間</p>
+            <p>
+                <?php echo esc_html(auto_tweet_gpt_get_next_scheduled_time()); ?>
+            </p>
+        </div>
 
         <form method="post" action="options.php">
             <?php
@@ -75,6 +96,7 @@ function auto_tweet_gpt_settings_page()
     </div>
 <?php
 }
+
 
 // 設定の登録
 function auto_tweet_gpt_register_settings()
@@ -311,7 +333,8 @@ function auto_tweet_gpt_quiet_end_field()
 }
 
 // ツイートログを表示する関数
-function auto_tweet_gpt_display_tweet_log() {
+function auto_tweet_gpt_display_tweet_log()
+{
     $tweet_log = get_option('auto_tweet_gpt_tweet_log', array());
     $tweet_log = array_reverse($tweet_log); // 最新順に表示
 
@@ -321,7 +344,9 @@ function auto_tweet_gpt_display_tweet_log() {
         echo '<ul class="tweet-log-list">';
         foreach (array_slice($tweet_log, 0, 50) as $log) {
             echo '<li class="tweet-log-item">';
-            echo '<span class="tweet-log-time">' . esc_html($log['time']) . '</span>';
+            // タイムスタンプを可読な日付形式に変換
+            $formatted_time = date('Y-m-d H:i:s', $log['time']);
+            echo '<span class="tweet-log-time">' . esc_html($formatted_time) . '</span>';
             echo '<span class="tweet-log-content">' . esc_html($log['content']) . '</span>';
             echo '</li>';
         }
@@ -329,10 +354,18 @@ function auto_tweet_gpt_display_tweet_log() {
     }
 }
 
-// ツイートの即時投稿処理
+// ツイートの即時投稿処理とツイートログ削除をadmin_initアクションに含める
 add_action('admin_init', function () {
+    // テスト投稿処理
     if (isset($_POST['test_tweet'])) {
         auto_tweet_gpt_execute();
+        wp_redirect(admin_url('options-general.php?page=auto-tweet-gpt-4'));
+        exit;
+    }
+
+    // ツイート履歴を削除する処理
+    if (isset($_POST['clear_tweet_log'])) {
+        update_option('auto_tweet_gpt_tweet_log', array());
         wp_redirect(admin_url('options-general.php?page=auto-tweet-gpt-4'));
         exit;
     }
@@ -344,13 +377,13 @@ function auto_tweet_gpt_save_tweet_log($content)
     $tweet_log = get_option('auto_tweet_gpt_tweet_log', array());
 
     $tweet_log[] = array(
-        'time'    => current_time('Y-m-d H:i:s'),
+        'time'    => time(), // 現在時刻を保存
         'content' => $content,
     );
 
-    // 50件以上の履歴があれば古いものを削除
-    if (count($tweet_log) > 50) {
-        array_shift($tweet_log);
+    // 20件以上の履歴がある場合、古いものから削除
+    if (count($tweet_log) > 20) {
+        $tweet_log = array_slice($tweet_log, -20);
     }
 
     update_option('auto_tweet_gpt_tweet_log', $tweet_log);
@@ -363,25 +396,34 @@ if (isset($_POST['clear_tweet_log'])) {
     exit;
 }
 
-// 定期実行のスケジュール設定
+// 定期実行のスケジュール設定関数
 function auto_tweet_gpt_schedule()
 {
+    // すでに登録されているスケジュールがある場合は一度クリアする
     if (wp_next_scheduled('auto_tweet_gpt_event')) {
         wp_clear_scheduled_hook('auto_tweet_gpt_event');
     }
 
+    // 設定オプションから実行間隔の分数（デフォルトは60分）を取得
     $frequency = (int)get_option('auto_tweet_gpt_frequency', 60);
-    wp_schedule_event(time(), 'auto_tweet_gpt_custom_interval', 'auto_tweet_gpt_event');
+
+    // 現在の時刻に、設定された分数の間隔で次のイベントをスケジュール
+    wp_schedule_single_event(time() + ($frequency * 60), 'auto_tweet_gpt_event');
 }
 
+// カスタムのスケジュール間隔を登録
 add_filter('cron_schedules', function ($schedules) {
+    // 設定オプションから実行間隔の分数（デフォルトは60分）を取得
     $frequency = (int)get_option('auto_tweet_gpt_frequency', 60);
+
+    // 分数を秒に変換してカスタムのスケジュール間隔を作成
     $schedules['auto_tweet_gpt_custom_interval'] = array(
-        'interval' => $frequency * 60,
-        'display'  => __('Custom Interval')
+        'interval' => $frequency * 60,  // 例: 60分を秒に変換して3600秒
+        'display'  => __('Custom Interval: ' . $frequency . ' minutes')  // スケジュール表示名
     );
     return $schedules;
 });
+
 
 // プロンプト（問い合わせ内容）を取得する関数
 function auto_tweet_gpt_get_prompt()
@@ -421,6 +463,7 @@ function auto_tweet_gpt_execute()
             // 現在時刻が制限時間内かチェック
             if ($quiet_start <= $current_time && $current_time < $quiet_end) {
                 error_log('Auto Tweet GPT: 投稿制限時間帯のため、ツイートをスキップしました。時刻: ' . $now->format('Y-m-d H:i:s'));
+                auto_tweet_gpt_schedule();
                 return;
             }
         }
@@ -471,9 +514,9 @@ function auto_tweet_gpt_execute()
         $hashtags = get_option('auto_tweet_gpt_hashtags', '');
 
         // ツイート文字数制限（URLや画像を考慮して280文字に制限）
-        $max_length = 280 - mb_strlen($hashtags) - 1;
-        $tweet = mb_substr($content, 0, $max_length) . ($hashtags ? ' ' . $hashtags : '');
-
+        //$max_length = 280 - mb_strlen($hashtags) - 1;
+        //$tweet = mb_substr($content, 0, $max_length) . ($hashtags ? ' ' . $hashtags : '');
+        $tweet = $content . ($hashtags ? ' ' . $hashtags : '');
         // TwitterOAuthの初期化
         $connection = new TwitterOAuth(
             $twitter_key,
@@ -498,7 +541,10 @@ function auto_tweet_gpt_execute()
         // 管理画面で表示するためにエラーを保存
         update_option('auto_tweet_gpt_last_error', date('Y-m-d H:i:s') . ': ' . $e->getMessage());
     }
+    auto_tweet_gpt_schedule();
 }
+
+// 実行される関数を登録
 add_action('auto_tweet_gpt_event', 'auto_tweet_gpt_execute');
 
 // プラグイン有効化時のスケジュール設定
@@ -510,7 +556,8 @@ register_deactivation_hook(__FILE__, function () {
 });
 
 
-function auto_tweet_gpt_custom_styles() {
+function auto_tweet_gpt_custom_styles()
+{
     echo '
     <style>
         .tweet-log-list {
@@ -540,4 +587,3 @@ function auto_tweet_gpt_custom_styles() {
     ';
 }
 add_action('admin_head', 'auto_tweet_gpt_custom_styles');
-
